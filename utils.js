@@ -64,26 +64,84 @@ WTL.utils = (() => {
 
   /**
    * Extract visible message text from a message element.
-   * Handles plain text, emoji, and quoted messages.
+   * 
+   * STRATEGY (in priority order):
+   *   1. Find the inner-most span with the actual message content (not metadata)
+   *      WhatsApp uses span.selectable-text inside copyable-text container
+   *   2. Fall back to copyable-text but aggressively strip metadata
+   *   3. Fall back to data-pre-plain-text attribute parsing
+   *   4. Last resort: longest text span heuristic
+   * 
+   * The key insight: WhatsApp's "copyable-text" element contains BOTH the
+   * message AND the timestamp/metadata as separate child elements. The
+   * actual message text lives in a specific inner span.
    */
   function extractMessageText(msgEl) {
-    // Primary: copyable text span used by WhatsApp internally
-    const copyable = msgEl.querySelector('[class*="copyable-text"]');
-    if (copyable) {
-      // Clone before manipulating so we never mutate WhatsApp's live DOM
-      const clone = copyable.cloneNode(true);
-      const quoted = clone.querySelector('[class*="quoted-mention"]');
-      if (quoted) quoted.remove();
-      return (clone.innerText || clone.textContent || '').trim();
+    // STRATEGY 1: Find the selectable-text span (this is the actual message)
+    // WhatsApp wraps the message text in span.selectable-text.copyable-text
+    // or in span with class containing "selectable-text"
+    const selectableText = msgEl.querySelector('span.selectable-text, span[class*="selectable-text"]');
+    if (selectableText) {
+      const clone = selectableText.cloneNode(true);
+      // Remove any nested timestamp/meta elements just in case
+      clone.querySelectorAll('[data-testid="msg-meta"], [class*="msg-meta"]').forEach(el => el.remove());
+      const text = (clone.innerText || clone.textContent || '').trim();
+      if (text) return _stripTrailingTimestamp(text);
     }
 
-    // Fallback: find the longest non-trivial span text
+    // STRATEGY 2: copyable-text container, but extract ONLY the message part
+    const copyable = msgEl.querySelector('[class*="copyable-text"]');
+    if (copyable) {
+      // The copyable-text element has data-pre-plain-text="[HH:MM, DD/MM/YYYY] Sender: "
+      // and its visible text contains: "Message contentHH:MM PM"
+      // We need to find just the message part.
+      
+      // First, try to find a child span that holds just the message (not the meta)
+      const innerSpan = copyable.querySelector('span:not([class*="time"]):not([class*="meta"]):not([class*="date"])');
+      if (innerSpan) {
+        const clone = innerSpan.cloneNode(true);
+        clone.querySelectorAll('[data-testid="msg-meta"], [class*="msg-meta"], [class*="time"], [class*="date"]').forEach(el => el.remove());
+        clone.querySelectorAll('svg').forEach(el => el.remove());
+        const text = (clone.innerText || clone.textContent || '').trim();
+        if (text && text.length > 0) return _stripTrailingTimestamp(text);
+      }
+
+      // Fallback: clone the whole thing and aggressively clean
+      const clone = copyable.cloneNode(true);
+      clone.querySelectorAll('[class*="quoted-mention"]').forEach(el => el.remove());
+      clone.querySelectorAll('[data-testid="msg-meta"], [class*="msg-meta"]').forEach(el => el.remove());
+      clone.querySelectorAll('[class*="time"], [class*="date"], [class*="meta"]').forEach(el => el.remove());
+      clone.querySelectorAll('svg').forEach(el => el.remove());
+      
+      const text = (clone.innerText || clone.textContent || '').trim();
+      if (text) return _stripTrailingTimestamp(text);
+    }
+
+    // STRATEGY 3: Fallback — use the longest non-trivial text span that doesn't look like a timestamp
     const spans = msgEl.querySelectorAll('span[class]');
+    let bestText = '';
     for (const s of spans) {
       const t = (s.innerText || '').trim();
-      if (t.length > 2) return t;
+      // Skip timestamps and very short text
+      if (t.length < 3) continue;
+      if (/^\d{1,2}:\d{2}/.test(t)) continue;
+      if (t.length > bestText.length) bestText = t;
     }
-    return '';
+    return _stripTrailingTimestamp(bestText);
+  }
+
+  /**
+   * Strip trailing timestamps from message text.
+   * Handles formats with OR without leading whitespace:
+   *   "Friday 6:28 PM" → "Friday"
+   *   "Friday6:28 PM"  → "Friday"  ← the bug case
+   *   "Friday 14:30"   → "Friday"
+   */
+  function _stripTrailingTimestamp(text) {
+    if (!text) return text;
+    // Match a timestamp at the end with OR without preceding whitespace
+    // Patterns: "6:28 PM", "14:30", "06:28pm"
+    return text.replace(/\s*\d{1,2}:\d{2}\s*(AM|PM|am|pm)?\s*$/, '').trim();
   }
 
   /**

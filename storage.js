@@ -157,6 +157,35 @@ WTL.storage = (() => {
     _cache = null;
   }
 
+  /**
+   * One-time migration: clean up tasks that were saved with timestamps
+   * concatenated to the message text (bug in v2.0.0 / v2.0.1).
+   * Idempotent — safe to run on every startup.
+   *
+   * Removes patterns like "...Friday6:28 PM" → "...Friday"
+   */
+  async function cleanupTimestampSuffixes() {
+    const tasks = await loadAll();
+    const re = /\s*\d{1,2}:\d{2}\s*(AM|PM|am|pm)?\s*$/;
+    let cleaned = 0;
+    const updated = { ...tasks };
+    for (const id in tasks) {
+      const t = tasks[id];
+      if (t.messageText && re.test(t.messageText)) {
+        const cleanText = t.messageText.replace(re, '').trim();
+        if (cleanText && cleanText !== t.messageText) {
+          updated[id] = { ...t, messageText: cleanText };
+          cleaned++;
+        }
+      }
+    }
+    if (cleaned > 0) {
+      await _persist(updated);
+      console.log('[WTL/storage] Cleaned timestamp suffix from ' + cleaned + ' task(s)');
+    }
+    return cleaned;
+  }
+
   return {
     loadAll,
     saveTask,
@@ -167,6 +196,7 @@ WTL.storage = (() => {
     findByMessageId,
     getPendingCount,
     onChange,
-    invalidateCache
+    invalidateCache,
+    cleanupTimestampSuffixes
   };
 })();

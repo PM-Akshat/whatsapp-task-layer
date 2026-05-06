@@ -562,6 +562,10 @@ WTL.content = (() => {
       if (WTL.analytics) WTL.analytics.init();
       // Backfill lastNudgedAt on existing tasks (idempotent)
       if (WTL.nudge) WTL.nudge.migrateExistingTasks();
+      // Clean up timestamp suffixes from existing tasks (bug in v2.0.0/v2.0.1)
+      if (WTL.storage && WTL.storage.cleanupTimestampSuffixes) {
+        WTL.storage.cleanupTimestampSuffixes();
+      }
 
       WTL.sidebar.init();
       _startObserver();
