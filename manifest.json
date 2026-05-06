@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WhatsApp Task Layer",
-  "version": "2.0.0",
+  "version": "2.0.2",
   "description": "Mark messages in WhatsApp Web as tasks. Track to-dos and waiting items in a unified sidebar. Get nudges to follow up on stale 'Waiting' items.",
   "permissions": [
     "storage"
